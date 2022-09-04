@@ -42,7 +42,7 @@ export async function intercept_vehicle_roll(...args) {
     if (possible_actors.length > 1) {
         log(module_name, 'Found >1 candidate actor, presenting options to user');
         // display a dialog to let the user pick between the actors
-        var actor = await configure_vehicle_roller(skill, roll, possible_actors);
+        var actor = await configure_vehicle_roller(skill, roll, possible_actors, vehicle_actor._id);
         // TODO: handle if they close out of the actor selection dialog
         while (!actor.hasOwnProperty('pool')) {
             await sleep(50);
@@ -57,7 +57,7 @@ export async function intercept_vehicle_roll(...args) {
         log(module_name, 'Found exactly one candidate actor, updating pool');
         // only one potential actor was detected, just use it
         // update the pool with the stuff added by the actor
-        args[1] = get_dice_pool(possible_actors[0].id, skill, roll);
+        args[1] = get_dice_pool(possible_actors[0].id, skill, roll, vehicle_actor._id);
         // update the title to show the user who is making the roll
         args[2] = game.actors.get(possible_actors[0].id).name + ' ' + args[2];
         // update the entity so the chat shows it properly
@@ -67,11 +67,12 @@ export async function intercept_vehicle_roll(...args) {
 }
 
 class SelectVehicleActor extends FormApplication {
-    constructor(skill, roll, possible_actors) {
+    constructor(skill, roll, possible_actors, vehicle_id) {
         super();
         this.skill = skill;
         this.roll = roll;
         this.possible_actors = possible_actors;
+        this.vehicle_id = vehicle_id;
     }
 
     static get defaultOptions() {
@@ -101,7 +102,7 @@ class SelectVehicleActor extends FormApplication {
     }
 
     async _updateObject(event, data) {
-        var pool = get_dice_pool(data['actor'], this.skill, this.roll);
+        var pool = get_dice_pool(data['actor'], this.skill, this.roll, this.vehicle_id);
         var actor = game.actors.get(data['actor']);
         this.actor_name = actor.name;
         this.actor_id = actor.id;
@@ -109,15 +110,22 @@ class SelectVehicleActor extends FormApplication {
     }
 }
 
-export async function configure_vehicle_roller(skill, roll, possible_actors) {
-    return await new SelectVehicleActor(skill, roll, possible_actors).render(true);
+export async function configure_vehicle_roller(skill, roll, possible_actors, vehicle_id) {
+    return await new SelectVehicleActor(skill, roll, possible_actors, vehicle_id).render(true);
 }
 
-function get_dice_pool(actor_id, skill_name, incoming_roll) {
+function get_dice_pool(actor_id, skill_name, incoming_roll, vehicle_id = null) {
     let actor = game.actors.get(actor_id);
     var parsed_skill_name = convert_skill_name(skill_name);
     var skill = actor.data.data.skills[parsed_skill_name];
-    var characteristic = actor.data.data.characteristics[skill.characteristic];
+    var characteristic_actor = actor.data.data.characteristics[skill.characteristic];
+    var characteristic = characteristic_actor;
+    var vehicle = game.actors.get(vehicle_id);
+    var actor_chassis = game.actors.getName(vehicle?.name+" Chassis");
+    var characteristic_chassis = actor_chassis?.data.data.characteristics[skill.characteristic];
+    if (characteristic_chassis) {
+        characteristic.value = Math.max(characteristic_actor.value, characteristic_chassis.value);
+    }
 
     let dicePool = new DicePoolFFG({
         ability: (Math.max(characteristic.value, skill.rank) + incoming_roll.ability) - (Math.min(characteristic.value, skill.rank) + incoming_roll.proficiency),
